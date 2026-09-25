@@ -3,8 +3,8 @@ from Settings import parameter, Setting
 
 class Func:
     def __init__(self):
-        self.CTM_temp = 0.48473
-        self.CTM_E0 = -1.31817
+        self.CTM_temp = 0.67938
+        self.CTM_E0 = 0.77987
 
     def isint(self,val):
         try:

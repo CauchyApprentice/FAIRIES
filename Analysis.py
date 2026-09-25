@@ -1,5 +1,5 @@
 import numpy as np
-from enum import IntEnum, auto
+from enum import IntEnum, auto, Enum
 from scipy.ndimage import gaussian_filter
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -10,7 +10,9 @@ from dataclasses import dataclass
 from typing import Any
 from functools import singledispatchmethod
 from Simulation import Run, sim
-from Extraction import extract
+from Extraction import extract, ResolutionMode
+import shutil
+from scipy.optimize import curve_fit
 
 class FaStep(IntEnum):
     fluct = auto()
@@ -33,6 +35,10 @@ class FluctuationAnalysisResult:
 class FluctuationAnalysisPlot:
     def __init__(self):
         self.linewidth = 1
+        self.param_name: dict = {
+            Setting.g_nEvent : "Events",
+            Setting.exp_resolution : "Res."
+        }
 
     def fluct_data(
             self,
@@ -41,16 +47,20 @@ class FluctuationAnalysisPlot:
             *,
             hide_exact_data: bool = False,
             run: Run = None,
-            label: str = ""
+            label: str = "",
+            log_scale: bool = False
             ) -> None:
         plt.step(energy, fluct_data, lw=self.linewidth, label=label)
-        if not hide_exact_data:
+        if log_scale:
+            plt.yscale("log")
+        if not hide_exact_data and run is not None:
             energy, data = extract.get_fluct_data(run)
             plt.plot(energy, data, color="grey", alpha=0.5)
         plt.xlabel("E / MeV")
-        plt.ylabel("Total Absorption Spectrum")
-        plt.legend()
-        plt.title("Experimental spectrum")
+        plt.ylabel("counts")
+        if label != "":
+            plt.legend()
+        plt.title("Input spectrum")
 
     def smooth(
             self,
@@ -60,14 +70,18 @@ class FluctuationAnalysisPlot:
             rough: list,
             *,
             run: Run = None,
-            label: str = ""
+            label: str = "",
+            log_scale: bool = False
             ) -> None:
         plt.plot(energy, fluct_data, label=label)
         plt.plot(energy, fine)
         plt.plot(energy, rough)
+        if log_scale:
+            plt.yscale("log")
         plt.xlabel("E in MeV")
-        plt.ylabel("Coincidence")
-        plt.legend()
+        plt.ylabel("counts")
+        if label != "":
+            plt.legend()
         plt.title("Rough/fine smoothing")
 
     def stationary(
@@ -79,11 +93,12 @@ class FluctuationAnalysisPlot:
             label: str = ""
             ) -> None:
         plt.xlabel("E in MeV")
-        plt.ylabel("'relative fluctuations'")
+        plt.ylabel("relative fluctuations")
         plt.title("Stationary spectrum")
         plt.ylim(0.5,1.5)
         plt.plot(energy, stationary, label=label)
-        plt.legend()
+        if label != "":
+            plt.legend()
 
     def autocorrelation(self, eps_start, eps_end, eps_step, energy, full_data, save_path, file_name, series = True, *, interval_low = 5, interval_high = 6):
         epsilons = np.arange(eps_start,eps_end,eps_step)
@@ -116,14 +131,15 @@ class FluctuationAnalysisPlot:
             label: str = ""
             ) -> None:
         self.pop_dist_comp(run, data_energy, nld)
-        plt.plot(data_energy, [func.rho(e) * 10*10 for e in data_energy], color="blue")
+        plt.plot(data_energy, [func.rho(e) for e in data_energy], color="blue")
         plt.scatter(energy_range, nld, marker="^", label=label)
-        plt.ylim(1,1e10)
-        plt.legend(loc="center left",bbox_to_anchor=(1.02, 0.5))
+        plt.ylim(1e-2,1e8)
+        if label != "":
+            plt.legend(loc="center left",bbox_to_anchor=(1.00, 0.5))
         plt.yscale("log")
-        plt.title("Original NLD and extracted NLD")
+        plt.title("CT model and extracted NLD")
         plt.xlabel("E / MeV")
-        plt.ylabel("#levels per MeV")
+        plt.ylabel("# levels per MeV")
 
     def helper_seriesplot(
             self,
@@ -132,7 +148,8 @@ class FluctuationAnalysisPlot:
             *,
             label: str = "no label",
             run: Run = None,
-            fluct_data_hide_exact_data: bool = False
+            fluct_data_hide_exact_data: bool = False,
+            log_scale: bool = False
             ) -> None:
         fluct_energy = fa.fluct_energy
         fluct_data = fa.fluct_data
@@ -143,9 +160,24 @@ class FluctuationAnalysisPlot:
         extract_nld = fa.nld
         match fa_step:
             case FaStep.fluct:
-                self.fluct_data(fluct_energy, fluct_data, run=run, label=label, hide_exact_data=fluct_data_hide_exact_data)
+                self.fluct_data(
+                    fluct_energy,
+                    fluct_data,
+                    run=run,
+                    label=label,
+                    hide_exact_data=fluct_data_hide_exact_data,
+                    log_scale=log_scale
+                    )
             case FaStep.smoothing:
-                self.smooth(fluct_energy, fluct_data, fine, rough, run=run, label=label)
+                self.smooth(
+                    fluct_energy,
+                    fluct_data,
+                    fine,
+                    rough,
+                    run=run,
+                    label=label,
+                    log_scale=log_scale
+                    )
             case FaStep.stationary:
                 self.stationary(fluct_energy, stationary, run=run, label=label)
             case FaStep.autocorr:
@@ -160,29 +192,43 @@ class FluctuationAnalysisPlot:
         (settings.std_path/settings.folder_autocorr_name).mkdir(exist_ok=True, parents=True)
         (settings.std_path/settings.folder_comparison_name).mkdir(exist_ok=True, parents=True)
 
+    def clear_folders(self) -> None:
+        shutil.rmtree(settings.std_path/settings.folder_fluct_name, ignore_errors=True)
+        shutil.rmtree(settings.std_path/settings.folder_smoothing_name, ignore_errors=True)
+        shutil.rmtree(settings.std_path/settings.folder_stationary_name, ignore_errors=True)
+        shutil.rmtree(settings.std_path/settings.folder_autocorr_name, ignore_errors=True)
+        shutil.rmtree(settings.std_path/settings.folder_comparison_name, ignore_errors=True)
+
+
+
     def label(self, iter_setting: Setting, value: Any):
         if func.isint(value):
-            modified = f"{value:,}"
+            modified = f"{int(value):,}"
         elif func.isfloat(value):
             modified = str(int(value*1e3))+"keV"
         else:
             print("cant find label for that value type")
-        return iter_setting.name+modified
+        if iter_setting in self.param_name:
+            setting_name = self.param_name[iter_setting]
+        else:   
+            setting_name = iter_setting.name
+        return setting_name+"="+modified
 
     def create(
         self,
         runs: list[Run],
         iter_setting: Setting,
         *,
-        figsize: tuple[float, float] = None,
+        figsize: tuple[float, float] = (6,3.7),
+        res_mode: ResolutionMode
         ) -> None:
         self.init_folders()
-        run_fa = [fluc.fluctuation_analysis(run) for run in runs]
+        run_fa = [fluc.fluctuation_analysis(run,res_mode=res_mode) for run in runs]
         for k in range(len(runs)):
             run = runs[k]
             fa = run_fa[k]
             for step in FaStep:
-                plt.figure()
+                plt.figure(figsize=figsize)
                 self.helper_seriesplot(fa, step, label=self.label(iter_setting, run.settings[iter_setting]), run=run)
                 plt.savefig(
                     settings.std_path / FluctuationAnalysis.fa_step_to_folder_name[step] / (self.label(iter_setting,run.settings[iter_setting])+".png"),
@@ -191,7 +237,7 @@ class FluctuationAnalysisPlot:
                 plt.close()
         if len(runs) > 1:
             for step in FaStep:
-                plt.figure()
+                plt.figure(figsize=figsize)
                 for k in range(len(runs)):
                     run = runs[k]
                     fa = run_fa[k]
@@ -213,16 +259,18 @@ class FluctuationAnalysisPlot:
             iter_setting: Setting,
             iter_range: list,
             *,
-            plot_single: bool = True
+            plot_single: bool = True,
+            figsize: tuple = (6,3.7),
+            res_mode: ResolutionMode
             ) -> None:
         self.init_folders()
         if plot_single:
             for param in iter_range:
                 param0 = parameter[iter_setting]
                 parameter[iter_setting] = param
-                fa = fluc.fluctuation_analysis(run)
+                fa = fluc.fluctuation_analysis(run,res_mode=res_mode)
                 for step in FaStep:
-                    plt.figure()
+                    plt.figure(figsize=figsize)
                     self.helper_seriesplot(fa, step, label=self.label(iter_setting,param), run=run)
                     plt.savefig(
                         settings.std_path / FluctuationAnalysis.fa_step_to_folder_name[step] / (self.label(iter_setting,param)+".png"),
@@ -231,11 +279,11 @@ class FluctuationAnalysisPlot:
                     plt.close()
                 parameter[iter_setting] = param0
         for step in FaStep:
-            plt.figure()
+            plt.figure(figsize=figsize)
             for param in iter_range:
                 param0 = parameter[iter_setting]
                 parameter[iter_setting] = param
-                fa = fluc.fluctuation_analysis(run)
+                fa = fluc.fluctuation_analysis(run,res_mode=res_mode)
                 self.helper_seriesplot(fa, step, label=self.label(iter_setting,param), run=run, fluct_data_hide_exact_data=True)
                 parameter[iter_setting] = param0
             plt.savefig(
@@ -246,11 +294,12 @@ class FluctuationAnalysisPlot:
 
     def create_by_fa(
             self,
-            fa: list[FluctuationAnalysisResult],
+            fa: FluctuationAnalysisResult,
             *,
-            figsize: tuple[float, float] = None,
             run: Run | list[Run] = None,
-            file_name: str
+            file_name: str,
+            log_scale: bool = False,
+            figsize: tuple = (6,3.7)
             ) -> None:
         if isinstance(fa, FluctuationAnalysisResult):
             single = True
@@ -258,13 +307,13 @@ class FluctuationAnalysisPlot:
             single = False
         self.init_folders()
         for step in FaStep:
-            plt.figure()
+            plt.figure(figsize=figsize)
             if single:
-                self.helper_seriesplot(fa, step, file_name=file_name, run=run)
+                self.helper_seriesplot(fa, step, label=file_name, run=run, log_scale=log_scale)
             else:
                 for k in range(len(fa)):
-                    self.helper_seriesplot(fa[k], step, file_name=file_name, run=run[k])
-            plt.savefig(settings.std_path / FluctuationAnalysis.fa_step_to_folder_name[step] / (file_name+".png"), dpi = 300)
+                    self.helper_seriesplot(fa, step, label=file_name, run=run, log_scale=log_scale)
+            plt.savefig(settings.std_path / FluctuationAnalysis.fa_step_to_folder_name[step] / (file_name+".png"), dpi = 300, bbox_inches = "tight")
             plt.close()
 
 class FluctuationAnalysis:
@@ -322,6 +371,22 @@ class FluctuationAnalysis:
     def get_energy_width(self, energy):
         return np.mean(np.diff(energy))
 
+    def get_fit_slope(
+            self,
+            energy_range: list,
+            nld: list
+            ) -> tuple:
+        #ways: directly fit exp func
+        #or log data and fit line
+        # model = lambda E, c, b, a, d: c*np.exp((E-b)/a) + d
+        # p0 = []
+        log_nld = [np.log10(nld_val) for nld_val in nld]
+        model = lambda E, sl, off: sl*E + off
+        opt, cov = curve_fit(model, energy_range, log_nld)
+        slope = opt[0]
+        return slope
+        
+
     @singledispatchmethod
     def fluctuation_analysis(
         self,
@@ -354,8 +419,10 @@ class FluctuationAnalysis:
     def _(
         self,
         run: Run,
+        *,
+        res_mode: ResolutionMode
         ):
-        energy, smeared_data = extract.spectrum_smeared(run,plot=False,exp_res=parameter[Setting.exp_resolution])
+        energy, smeared_data = extract.spectrum_smeared(run,plot=False,exp_res=parameter[Setting.exp_resolution],res_mode=res_mode)
         return self.fluctuation_analysis(energy, smeared_data)
 
     def iterate(self, energy, fluct_data, nld_energy, nld, param, param_range):

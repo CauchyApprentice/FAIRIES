@@ -6,23 +6,34 @@ import uproot
 from Settings import Setting, settings, parameter
 from Simulation import Run, sim
 from scipy.stats import norm
+from enum import Enum
+
+class ResolutionMode(Enum):
+    const = "Static resolution"
+    percentage = "Percent. resolution"
 
 class Extraction:
     def __init__(self):
         pass
 
-    def apply_resolution(self, energy: list[float], data: list[float], exp_res: float) -> list:
+    def apply_resolution(self, energy: list[float], data: list[float], exp_res: float, res_mode: ResolutionMode) -> list:
         h = np.mean(np.diff(energy)) #bin width
         energy_left = [en - h/2 for en in energy]
         energy_edges = energy_left + [max(energy_left)+h]
         bin_center = lambda i: energy_edges[i] + h/2
         smeared = np.zeros(len(data)) #initializing smeared list
-        sigma = lambda i: exp_res
+        match res_mode:
+            case ResolutionMode.const:
+                sigma = lambda E: exp_res
+            case ResolutionMode.percentage:
+                sigma = lambda E: 0.06*E
+        
         for j in range(len(data)):
+            src_energy = bin_center(j)
             weights = (
-                norm.cdf(energy_edges[1:], loc=bin_center(j), scale=sigma(j))
+                norm.cdf(energy_edges[1:], loc=src_energy, scale=sigma(src_energy))
                 -
-                norm.cdf(energy_edges[:-1], loc=bin_center(j), scale=sigma(j))
+                norm.cdf(energy_edges[:-1], loc=src_energy, scale=sigma(src_energy))
             )
             smeared += data[j] * weights
         return smeared
@@ -86,11 +97,11 @@ class Extraction:
             fluct_data_dict[int(spin)] = counts[k].tolist()
         return (energy.tolist(), fluct_data_dict[-1])
 
-    def spectrum_smeared(self, run: Run, *, exp_res: float = 0.001, plot: bool = False) -> tuple[list, list]:
+    def spectrum_smeared(self, run: Run, *, exp_res: float = 0.001, plot: bool = False, res_mode: ResolutionMode) -> tuple[list, list]:
         energy, data = self.get_fluct_data(run, plot=plot)
         if exp_res == 0:
             return energy, data
-        return energy, self.apply_resolution(energy, data, exp_res)
+        return energy, self.apply_resolution(energy, data, exp_res,res_mode=res_mode)
         
 
 extract = Extraction()

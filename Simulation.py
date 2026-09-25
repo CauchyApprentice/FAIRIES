@@ -257,6 +257,17 @@ class Simulation:
                 destination=save_path
                 )
 
+        def iterate(self, param_range: list, *, save_path: Path, max_workers: int) -> None:
+            ev0 = parameter[Setting.g_nEvent]
+            for k in range(len(param_range)):
+                print(Setting(Setting.g_nEvent).name+": "+str(param_range[k]))
+                parameter[Setting.g_nEvent] = param_range[k]
+                start_time = time.perf_counter()
+                self.run(events=param_range[k],max_workers=max_workers,save_path=save_path)
+                time_passed = time.perf_counter() - start_time
+                print("time taken: "+str(round(time_passed)))
+            parameter[Setting.g_nEvent] = ev0
+
     def iterate(self, param: Setting, param_range: list, *, save_path: Path = None) -> None:
         if save_path == None:
             save_path = settings.std_path
