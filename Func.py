@@ -1,10 +1,28 @@
 import numpy as np
 from Settings import parameter, Setting
+from enum import Enum
+
+class ResolutionMode(Enum):
+    const = "Static resolution"
+    percentage = "Percent. resolution"
 
 class Func:
     def __init__(self):
         self.CTM_temp = 0.67938
         self.CTM_E0 = 0.77987
+
+    def sigma_res(self, energy: list, res_mode: ResolutionMode):
+        '''
+        FOR FLUCTUATION ANALYSIS NOT FOR SMEARING THE DATA
+        '''
+        if res_mode == ResolutionMode.const:
+            sigma = np.asarray(
+                [parameter[Setting.exp_resolution] / 2 for _ in energy],
+                dtype=float
+            )
+        elif res_mode == ResolutionMode.percentage:
+            sigma = np.asarray(energy, dtype=float) * 0.01 / 2
+        return sigma
 
     def isint(self,val):
         try:

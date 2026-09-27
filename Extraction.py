@@ -7,10 +7,7 @@ from Settings import Setting, settings, parameter
 from Simulation import Run, sim
 from scipy.stats import norm
 from enum import Enum
-
-class ResolutionMode(Enum):
-    const = "Static resolution"
-    percentage = "Percent. resolution"
+from Func import ResolutionMode
 
 class Extraction:
     def __init__(self):
@@ -26,8 +23,7 @@ class Extraction:
             case ResolutionMode.const:
                 sigma = lambda E: exp_res
             case ResolutionMode.percentage:
-                sigma = lambda E: 0.06*E
-        
+                sigma = lambda E: 0.01*E
         for j in range(len(data)):
             src_energy = bin_center(j)
             weights = (
